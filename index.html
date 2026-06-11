@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Password Vault</title>
+    <style>
+        :root {
+            --bg: #0f0f1a;
+            --surface: #1a1a2e;
+            --card: #16213e;
+            --primary: #e94560;
+            --text: #eaeaea;
+            --muted: #888;
+            --success: #4caf50;
+            --radius: 12px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            max-width: 480px;
+            margin: 0 auto;
+        }
+        .screen { display: none; flex-direction: column; min-height: 100vh; padding: 24px 16px; }
+        .screen.active { display: flex; }
+
+        .logo { text-align: center; margin: 48px 0 36px; }
+        .logo .icon { font-size: 56px; }
+        .logo h1 { font-size: 26px; font-weight: 700; margin-top: 12px; }
+        .logo p { color: var(--muted); margin-top: 8px; font-size: 14px; }
+
+        .form-group { margin-bottom: 16px; }
+        label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+        input[type=text], input[type=password] {
+            width: 100%; padding: 14px 16px;
+            background: var(--card); border: 1px solid #2a2a4a;
+            border-radius: var(--radius); color: var(--text);
+            font-size: 16px; outline: none; transition: border-color 0.2s;
+        }
+        input:focus { border-color: var(--primary); }
+
+        .btn {
+            width: 100%; padding: 14px; border: none;
+            border-radius: var(--radius); font-size: 16px;
+            font-weight: 600; cursor: pointer; transition: opacity 0.15s;
+        }
+        .btn:active { opacity: 0.75; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-secondary { background: var(--card); color: var(--text); border: 1px solid #2a2a4a; }
+        .btn-danger { background: #c0392b; color: white; }
+        .btn-sm { width: auto; padding: 8px 14px; font-size: 13px; }
+
+        .msg { font-size: 13px; margin-top: 10px; min-height: 18px; }
+        .msg.error { color: var(--primary); }
+        .msg.info { color: var(--muted); }
+
+        /* MAIN */
+        .header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 16px; background: var(--surface);
+            position: sticky; top: 0; z-index: 10; border-bottom: 1px solid #1e1e3f;
+        }
+        .header h2 { font-size: 18px; }
+        .icon-btn {
+            background: var(--card); border: none; color: var(--text);
+            width: 40px; height: 40px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; font-size: 18px;
+        }
+        .search-wrap { padding: 12px 16px; background: var(--surface); }
+        .search-wrap input { border-radius: 24px; padding: 10px 16px; }
+        .sync-bar { font-size: 12px; color: var(--muted); text-align: center; padding: 6px; }
+        .entries { flex: 1; padding: 8px 16px 80px; }
+
+        .entry-card {
+            background: var(--card); border-radius: var(--radius);
+            padding: 16px; margin-bottom: 10px;
+            border: 1px solid #1e1e3f; cursor: pointer;
+            transition: border-color 0.15s;
+        }
+        .entry-card:hover { border-color: #3a3a6f; }
+        .entry-name { font-weight: 600; font-size: 16px; margin-bottom: 4px; }
+        .entry-user { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+        .entry-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+
+        .fab {
+            position: fixed; bottom: 24px; right: 24px;
+            width: 56px; height: 56px; border-radius: 50%;
+            background: var(--primary); color: white; border: none;
+            font-size: 28px; cursor: pointer;
+            box-shadow: 0 4px 20px rgba(233,69,96,0.45);
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        /* MODAL */
+        .overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.75); z-index: 100;
+            align-items: flex-end;
+        }
+        .overlay.active { display: flex; }
+        .modal {
+            background: var(--surface); border-radius: 24px 24px 0 0;
+            padding: 24px 16px 32px; width: 100%;
+            max-height: 92vh; overflow-y: auto;
+        }
+        .modal h3 { font-size: 20px; margin-bottom: 20px; }
+        .pw-wrap { position: relative; }
+        .pw-wrap input { padding-right: 48px; }
+        .pw-eye {
+            position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+            background: none; border: none; color: var(--muted); cursor: pointer; font-size: 18px;
+        }
+        .modal-footer { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+
+        /* TOAST */
+        .toast {
+            position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
+            background: var(--success); color: white;
+            padding: 10px 22px; border-radius: 24px;
+            font-size: 14px; font-weight: 600;
+            opacity: 0; transition: opacity 0.3s;
+            pointer-events: none; white-space: nowrap; z-index: 200;
+        }
+        .toast.show { opacity: 1; }
+
+        .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
+        .empty span { font-size: 48px; display: block; margin-bottom: 16px; }
+    </style>
+</head>
+<body>
+
+<!-- SETUP -->
+<div id="screen-setup" class="screen">
+    <div class="logo">
+        <div class="icon">🔐</div>
+        <h1>Password Vault</h1>
+        <p>Prima configurazione su questo dispositivo</p>
+    </div>
+    <div class="form-group">
+        <label>Token GitHub</label>
+        <input type="password" id="s-token" placeholder="ghp_...">
+    </div>
+    <div class="form-group">
+        <label>Password Master (cifra tutti i tuoi dati)</label>
+        <input type="password" id="s-master" placeholder="Scegli una password sicura">
+    </div>
+    <div class="form-group">
+        <label>Conferma Password Master</label>
+        <input type="password" id="s-master2" placeholder="Ripeti la password" onkeydown="if(event.key==='Enter')doSetup()">
+    </div>
+    <div class="msg" id="s-msg"></div>
+    <button class="btn btn-primary" style="margin-top:12px" onclick="doSetup()">Configura e accedi</button>
+</div>
+
+<!-- LOGIN -->
+<div id="screen-login" class="screen">
+    <div class="logo">
+        <div class="icon">🔐</div>
+        <h1>Password Vault</h1>
+        <p>Inserisci la password master per sbloccare</p>
+    </div>
+    <div class="form-group">
+        <label>Password Master</label>
+        <input type="password" id="l-master" placeholder="Password master" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <div class="msg" id="l-msg"></div>
+    <button class="btn btn-primary" style="margin-top:12px" onclick="doLogin()">Sblocca</button>
+    <button class="btn btn-secondary" style="margin-top:12px" onclick="doReset()">Configura nuovo dispositivo</button>
+</div>
+
+<!-- MAIN -->
+<div id="screen-main" class="screen" style="padding:0">
+    <div class="header">
+        <h2>🔐 Vault</h2>
+        <button class="icon-btn" onclick="doLock()" title="Blocca">🔒</button>
+    </div>
+    <div class="search-wrap">
+        <input type="text" placeholder="Cerca..." oninput="filterEntries(this.value)" style="width:100%">
+    </div>
+    <div class="sync-bar" id="sync-bar"></div>
+    <div class="entries" id="entries"></div>
+    <button class="fab" onclick="openAdd()">＋</button>
+</div>
+
+<!-- MODAL VOCE -->
+<div class="overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+        <h3 id="modal-title">Nuova voce</h3>
+        <input type="hidden" id="m-id">
+        <div class="form-group">
+            <label>Nome / Sito / App</label>
+            <input type="text" id="m-name" placeholder="es. Gmail, Netflix, Banca...">
+        </div>
+        <div class="form-group">
+            <label>Username / Email</label>
+            <input type="text" id="m-user" placeholder="nome@email.com" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="form-group">
+            <label>Password</label>
+            <div class="pw-wrap">
+                <input type="password" id="m-pass" placeholder="Password" autocomplete="off" spellcheck="false">
+                <button class="pw-eye" onclick="toggleEye()">👁</button>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Note (PIN, info extra...)</label>
+            <input type="text" id="m-note" placeholder="Facoltativo">
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-primary btn-sm" onclick="saveEntry()">Salva</button>
+            <button class="btn btn-secondary btn-sm" onclick="closeModal()">Annulla</button>
+            <button class="btn btn-danger btn-sm" id="m-del" onclick="deleteEntry()" style="display:none">Elimina</button>
+        </div>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── CRYPTO ──────────────────────────────────────────────────
+async function deriveKey(password, salt) {
+    const km = await crypto.subtle.importKey('raw', enc(password), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt, iterations: 150000, hash: 'SHA-256' },
+        km, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+    );
+}
+async function aesEncrypt(key, obj) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc(JSON.stringify(obj)));
+    return { iv: b64(iv), ct: b64(new Uint8Array(ct)) };
+}
+async function aesDecrypt(key, payload) {
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ub64(payload.iv) }, key, ub64(payload.ct));
+    return JSON.parse(dec(pt));
+}
+const enc = s => new TextEncoder().encode(s);
+const dec = b => new TextDecoder().decode(b);
+const b64 = u => btoa(String.fromCharCode(...u));
+const ub64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+
+// ── GITHUB GIST ──────────────────────────────────────────────
+const GIST_DESC = '__password_vault_v1__';
+
+async function ghFetch(path, method = 'GET', body = null) {
+    const opts = {
+        method,
+        headers: {
+            Authorization: `token ${state.token}`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'PasswordVault'
+        }
+    };
+    if (body) opts.body = JSON.stringify(body);
+    const r = await fetch(`https://api.github.com${path}`, opts);
+    if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.message || `HTTP ${r.status}`);
+    }
+    return r.json();
+}
+
+async function findOrCreateGist() {
+    const gists = await ghFetch('/gists');
+    const found = gists.find(g => g.description === GIST_DESC);
+    if (found) return found.id;
+    const salt = b64(crypto.getRandomValues(new Uint8Array(16)));
+    const g = await ghFetch('/gists', 'POST', {
+        description: GIST_DESC, public: false,
+        files: { 'vault.json': { content: JSON.stringify({ salt, entries: null }) } }
+    });
+    return g.id;
+}
+
+async function loadGist(id) {
+    const g = await ghFetch(`/gists/${id}`);
+    return JSON.parse(g.files['vault.json'].content);
+}
+
+async function saveGist(id, data) {
+    await ghFetch(`/gists/${id}`, 'PATCH', {
+        files: { 'vault.json': { content: JSON.stringify(data) } }
+    });
+}
+
+// ── STATE ────────────────────────────────────────────────────
+const state = { token: null, gistId: null, key: null, vault: null, entries: [] };
+const ls = (k, v) => v === undefined ? localStorage.getItem(k) : localStorage.setItem(k, v);
+
+// ── SCREENS ──────────────────────────────────────────────────
+function show(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById('screen-' + id).classList.add('active');
+}
+
+function setMsg(id, text, type = 'info') {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    el.className = 'msg ' + type;
+}
+
+// ── SETUP ────────────────────────────────────────────────────
+async function doSetup() {
+    const token  = document.getElementById('s-token').value.trim();
+    const master = document.getElementById('s-master').value;
+    const master2 = document.getElementById('s-master2').value;
+
+    if (!token || !master) return setMsg('s-msg', 'Compila tutti i campi', 'error');
+    if (master !== master2) return setMsg('s-msg', 'Le password non corrispondono', 'error');
+    if (master.length < 6) return setMsg('s-msg', 'Password troppo corta (minimo 6 caratteri)', 'error');
+
+    setMsg('s-msg', '⏳ Connessione a GitHub...');
+    state.token = token;
+    try {
+        const gistId = await findOrCreateGist();
+        const vault  = await loadGist(gistId);
+        const salt   = ub64(vault.salt);
+        const key    = await deriveKey(master, salt);
+
+        let entries = [];
+        if (vault.entries) {
+            try { entries = await aesDecrypt(key, vault.entries); } catch {}
+        }
+
+        ls('token', token);
+        ls('gistId', gistId);
+
+        Object.assign(state, { gistId, key, vault, entries });
+        enterMain();
+    } catch(e) {
+        state.token = null;
+        setMsg('s-msg', e.message || 'Errore di connessione', 'error');
+    }
+}
+
+// ── LOGIN ────────────────────────────────────────────────────
+async function doLogin() {
+    const master = document.getElementById('l-master').value;
+    if (!master) return setMsg('l-msg', 'Inserisci la password master', 'error');
+
+    setMsg('l-msg', '⏳ Connessione...');
+    state.token  = ls('token');
+    state.gistId = ls('gistId');
+    try {
+        const vault = await loadGist(state.gistId);
+        const key   = await deriveKey(master, ub64(vault.salt));
+
+        let entries = [];
+        if (vault.entries) {
+            try {
+                entries = await aesDecrypt(key, vault.entries);
+            } catch {
+                return setMsg('l-msg', 'Password master errata', 'error');
+            }
+        }
+
+        Object.assign(state, { key, vault, entries });
+        enterMain();
+    } catch(e) {
+        setMsg('l-msg', e.message || 'Errore', 'error');
+    }
+}
+
+function enterMain() {
+    show('main');
+    renderEntries(state.entries);
+    setSyncBar('Sincronizzato ✓');
+}
+
+// ── LOCK / RESET ─────────────────────────────────────────────
+function doLock() {
+    Object.assign(state, { key: null, entries: [], vault: null });
+    document.getElementById('l-master').value = '';
+    setMsg('l-msg', '');
+    show('login');
+    setTimeout(() => document.getElementById('l-master').focus(), 100);
+}
+
+function doReset() {
+    if (!confirm('Questo rimuove la configurazione da questo dispositivo.\nI tuoi dati su GitHub restano al sicuro.\n\nContinuare?')) return;
+    localStorage.clear();
+    location.reload();
+}
+
+// ── RENDER ───────────────────────────────────────────────────
+function renderEntries(list) {
+    const el = document.getElementById('entries');
+    if (!list.length) {
+        el.innerHTML = '<div class="empty"><span>🔑</span>Nessuna voce.<br>Premi + per aggiungere.</div>';
+        return;
+    }
+    el.innerHTML = list.map(e => `
+        <div class="entry-card" onclick="openEdit('${e.id}')">
+            <div class="entry-name">${x(e.name)}</div>
+            <div class="entry-user">${x(e.user || '—')}</div>
+            <div class="entry-btns">
+                <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();cp('${x(e.user)}','Username copiato')">📋 User</button>
+                <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();cp('${x(e.pass)}','Password copiata')">🔑 Pass</button>
+            </div>
+        </div>`).join('');
+}
+
+function filterEntries(q) {
+    const f = q ? state.entries.filter(e =>
+        e.name.toLowerCase().includes(q.toLowerCase()) ||
+        (e.user || '').toLowerCase().includes(q.toLowerCase())
+    ) : state.entries;
+    renderEntries(f);
+}
+
+// ── MODAL ────────────────────────────────────────────────────
+function openAdd() {
+    document.getElementById('modal-title').textContent = 'Nuova voce';
+    ['m-id','m-name','m-user','m-pass','m-note'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('m-pass').type = 'password';
+    document.getElementById('m-del').style.display = 'none';
+    document.getElementById('modal-overlay').classList.add('active');
+    setTimeout(() => document.getElementById('m-name').focus(), 100);
+}
+
+function openEdit(id) {
+    const e = state.entries.find(x => x.id === id);
+    if (!e) return;
+    document.getElementById('modal-title').textContent = 'Modifica voce';
+    document.getElementById('m-id').value   = e.id;
+    document.getElementById('m-name').value = e.name;
+    document.getElementById('m-user').value = e.user  || '';
+    document.getElementById('m-pass').value = e.pass;
+    document.getElementById('m-note').value = e.note  || '';
+    document.getElementById('m-pass').type  = 'password';
+    document.getElementById('m-del').style.display = 'inline-block';
+    document.getElementById('modal-overlay').classList.add('active');
+}
+
+function closeModal() { document.getElementById('modal-overlay').classList.remove('active'); }
+
+function toggleEye() {
+    const i = document.getElementById('m-pass');
+    i.type = i.type === 'password' ? 'text' : 'password';
+}
+
+async function saveEntry() {
+    const name = document.getElementById('m-name').value.trim();
+    const pass = document.getElementById('m-pass').value;
+    if (!name || !pass) return toast('Nome e password obbligatori', true);
+
+    const id  = document.getElementById('m-id').value || Date.now().toString(36);
+    const entry = {
+        id, name,
+        user: document.getElementById('m-user').value.trim(),
+        pass,
+        note: document.getElementById('m-note').value.trim()
+    };
+    const idx = state.entries.findIndex(e => e.id === id);
+    if (idx >= 0) state.entries[idx] = entry; else state.entries.push(entry);
+
+    closeModal();
+    renderEntries(state.entries);
+    await persist();
+}
+
+async function deleteEntry() {
+    if (!confirm('Eliminare questa voce?')) return;
+    const id = document.getElementById('m-id').value;
+    state.entries = state.entries.filter(e => e.id !== id);
+    closeModal();
+    renderEntries(state.entries);
+    await persist();
+}
+
+// ── SYNC ─────────────────────────────────────────────────────
+async function persist() {
+    setSyncBar('⏳ Salvataggio...');
+    try {
+        const encrypted = await aesEncrypt(state.key, state.entries);
+        state.vault.entries = encrypted;
+        await saveGist(state.gistId, state.vault);
+        setSyncBar('Sincronizzato ✓');
+        toast('Salvato');
+    } catch(e) {
+        setSyncBar('⚠️ Errore sincronizzazione — riprova');
+    }
+}
+
+function setSyncBar(t) { document.getElementById('sync-bar').textContent = t; }
+
+// ── UTILS ────────────────────────────────────────────────────
+function x(s) {
+    return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function cp(text, msg) {
+    navigator.clipboard.writeText(text).then(() => toast(msg)).catch(() => toast('Errore copia', true));
+}
+
+function toast(msg, err = false) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.background = err ? '#e94560' : '#4caf50';
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ── INIT ─────────────────────────────────────────────────────
+(function() {
+    if (ls('token') && ls('gistId')) {
+        show('login');
+        setTimeout(() => document.getElementById('l-master').focus(), 100);
+    } else {
+        show('setup');
+    }
+})();
+</script>
+</body>
+</html>

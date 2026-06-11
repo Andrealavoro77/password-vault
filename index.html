@@ -243,8 +243,9 @@ const dec = b => new TextDecoder().decode(b);
 const b64 = u => btoa(String.fromCharCode(...u));
 const ub64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 
-// ── GITHUB GIST ──────────────────────────────────────────────
-const GIST_DESC = '__password_vault_v1__';
+// ── GITHUB REPO STORAGE ──────────────────────────────────────
+const VAULT_REPO = 'pw-vault-data';
+const VAULT_FILE = 'vault.json';
 
 async function ghFetch(path, method = 'GET', body = null) {
     const opts = {
@@ -257,6 +258,7 @@ async function ghFetch(path, method = 'GET', body = null) {
     };
     if (body) opts.body = JSON.stringify(body);
     const r = await fetch(`https://api.github.com${path}`, opts);
+    if (r.status === 404) return null;
     if (!r.ok) {
         const err = await r.json().catch(() => ({}));
         throw new Error(err.message || `HTTP ${r.status}`);
@@ -264,27 +266,60 @@ async function ghFetch(path, method = 'GET', body = null) {
     return r.json();
 }
 
+async function getUsername() {
+    const u = await ghFetch('/user');
+    return u.login;
+}
+
+async function ensureRepo(owner) {
+    const existing = await ghFetch(`/repos/${owner}/${VAULT_REPO}`);
+    if (existing) return;
+    await ghFetch('/user/repos', 'POST', {
+        name: VAULT_REPO, private: true, auto_init: false,
+        description: 'Password Vault - dati cifrati'
+    });
+    await new Promise(r => setTimeout(r, 1500));
+}
+
+async function loadVault(owner) {
+    const r = await ghFetch(`/repos/${owner}/${VAULT_REPO}/contents/${VAULT_FILE}`);
+    if (!r) return null;
+    const content = atob(r.content.replace(/\n/g, ''));
+    return { data: JSON.parse(content), sha: r.sha };
+}
+
+async function saveVault(owner, data, sha) {
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
+    const body = { message: 'update vault', content };
+    if (sha) body.sha = sha;
+    const r = await ghFetch(`/repos/${owner}/${VAULT_REPO}/contents/${VAULT_FILE}`, 'PUT', body);
+    return r.content.sha;
+}
+
 async function findOrCreateGist() {
-    const gists = await ghFetch('/gists');
-    const found = gists.find(g => g.description === GIST_DESC);
-    if (found) return found.id;
+    const owner = await getUsername();
+    state.owner = owner;
+    await ensureRepo(owner);
+    const result = await loadVault(owner);
+    if (result) return result.data;
     const salt = b64(crypto.getRandomValues(new Uint8Array(16)));
-    const g = await ghFetch('/gists', 'POST', {
-        description: GIST_DESC, public: false,
-        files: { 'vault.json': { content: JSON.stringify({ salt, entries: null }) } }
-    });
-    return g.id;
+    const initData = { salt, entries: null };
+    await saveVault(owner, initData, null);
+    state.vaultSha = (await loadVault(owner)).sha;
+    return initData;
 }
 
-async function loadGist(id) {
-    const g = await ghFetch(`/gists/${id}`);
-    return JSON.parse(g.files['vault.json'].content);
+async function loadGist() {
+    const owner = state.owner || await getUsername();
+    state.owner = owner;
+    const result = await loadVault(owner);
+    if (!result) throw new Error('Vault non trovato');
+    state.vaultSha = result.sha;
+    return result.data;
 }
 
-async function saveGist(id, data) {
-    await ghFetch(`/gists/${id}`, 'PATCH', {
-        files: { 'vault.json': { content: JSON.stringify(data) } }
-    });
+async function saveGist(data) {
+    state.vaultSha = await saveVault(state.owner, data, state.vaultSha);
 }
 
 // ── STATE ────────────────────────────────────────────────────
@@ -316,10 +351,9 @@ async function doSetup() {
     setMsg('s-msg', '⏳ Connessione a GitHub...');
     state.token = token;
     try {
-        const gistId = await findOrCreateGist();
-        const vault  = await loadGist(gistId);
-        const salt   = ub64(vault.salt);
-        const key    = await deriveKey(master, salt);
+        const vault = await findOrCreateGist();
+        const salt  = ub64(vault.salt);
+        const key   = await deriveKey(master, salt);
 
         let entries = [];
         if (vault.entries) {
@@ -327,9 +361,9 @@ async function doSetup() {
         }
 
         ls('token', token);
-        ls('gistId', gistId);
+        ls('owner', state.owner);
 
-        Object.assign(state, { gistId, key, vault, entries });
+        Object.assign(state, { key, vault, entries });
         enterMain();
     } catch(e) {
         state.token = null;
@@ -343,10 +377,10 @@ async function doLogin() {
     if (!master) return setMsg('l-msg', 'Inserisci la password master', 'error');
 
     setMsg('l-msg', '⏳ Connessione...');
-    state.token  = ls('token');
-    state.gistId = ls('gistId');
+    state.token = ls('token');
+    state.owner = ls('owner');
     try {
-        const vault = await loadGist(state.gistId);
+        const vault = await loadGist();
         const key   = await deriveKey(master, ub64(vault.salt));
 
         let entries = [];
@@ -359,6 +393,7 @@ async function doLogin() {
         }
 
         Object.assign(state, { key, vault, entries });
+        ls('owner', state.owner);
         enterMain();
     } catch(e) {
         setMsg('l-msg', e.message || 'Errore', 'error');
@@ -478,7 +513,7 @@ async function persist() {
     try {
         const encrypted = await aesEncrypt(state.key, state.entries);
         state.vault.entries = encrypted;
-        await saveGist(state.gistId, state.vault);
+        await saveGist(state.vault);
         setSyncBar('Sincronizzato ✓');
         toast('Salvato');
     } catch(e) {
@@ -507,7 +542,7 @@ function toast(msg, err = false) {
 
 // ── INIT ─────────────────────────────────────────────────────
 (function() {
-    if (ls('token') && ls('gistId')) {
+    if (ls('token') && ls('owner')) {
         show('login');
         setTimeout(() => document.getElementById('l-master').focus(), 100);
     } else {

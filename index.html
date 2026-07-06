@@ -159,6 +159,13 @@
         }
         .sync-banner.show { display: block; }
 
+        .csv-reminder-banner {
+            display: none; background: #b8860b; color: #fff;
+            font-size: 13px; font-weight: 600; text-align: center;
+            padding: 10px 16px; cursor: pointer;
+        }
+        .csv-reminder-banner.show { display: block; }
+
         .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
         .empty span { font-size: 48px; display: block; margin-bottom: 16px; }
     </style>
@@ -208,9 +215,14 @@
 <div id="screen-main" class="screen" style="padding:0">
     <div class="header">
         <h2>🔐 Vault</h2>
-        <button class="icon-btn" onclick="doLock()" title="Blocca">🔒</button>
+        <div style="display:flex; gap:8px">
+            <button class="icon-btn" onclick="document.getElementById('csv-file-input').click()" title="Importa da CSV">📥</button>
+            <button class="icon-btn" onclick="doLock()" title="Blocca">🔒</button>
+        </div>
     </div>
+    <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="handleCsvImport(event)">
     <div class="sync-banner" id="sync-banner" onclick="persist()">⚠️ Non sincronizzato — i dati NON sono ancora salvati online, riprova</div>
+    <div class="csv-reminder-banner" id="csv-reminder-banner" onclick="hideCsvReminder()">🗑️ Ricordati di eliminare il file CSV e svuotare il cestino del PC (tocca per chiudere)</div>
     <div class="search-wrap">
         <input type="text" placeholder="Cerca..." oninput="filterEntries(this.value)" style="width:100%">
     </div>
@@ -468,6 +480,7 @@ function enterMain() {
     state.searchQuery = '';
     show('main');
     hideSyncBanner();
+    hideCsvReminder();
     populateCategorySelect();
     renderCategoryChips();
     applyFilters();
@@ -609,6 +622,115 @@ async function deleteCategory(cat) {
     await persist();
 }
 
+// ── IMPORT CSV ───────────────────────────────────────────────
+function parseCSV(text) {
+    const rows = [];
+    let row = [];
+    let field = '';
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (inQuotes) {
+            if (ch === '"') {
+                if (text[i + 1] === '"') { field += '"'; i++; }
+                else { inQuotes = false; }
+            } else {
+                field += ch;
+            }
+        } else if (ch === '"') {
+            inQuotes = true;
+        } else if (ch === ',') {
+            row.push(field); field = '';
+        } else if (ch === '\r') {
+            // ignorato, gestito da \n
+        } else if (ch === '\n') {
+            row.push(field); field = '';
+            rows.push(row); row = [];
+        } else {
+            field += ch;
+        }
+    }
+    if (field.length > 0 || row.length > 0) {
+        row.push(field);
+        rows.push(row);
+    }
+    return rows.filter(r => r.some(f => f.trim() !== ''));
+}
+
+function detectCsvColumns(headerRow) {
+    const idx = {};
+    headerRow.forEach((h, i) => {
+        const key = h.trim().toLowerCase();
+        if (key === 'name') idx.name = i;
+        else if (key === 'url') idx.url = i;
+        else if (key === 'username') idx.username = i;
+        else if (key === 'password') idx.password = i;
+    });
+    return idx;
+}
+
+function domainFromUrl(url) {
+    if (!url) return '';
+    try { return new URL(url).hostname.replace(/^www\./, ''); }
+    catch { return url; }
+}
+
+function csvRowToEntry(row, colIdx, i) {
+    const get = key => (colIdx[key] !== undefined ? (row[colIdx[key]] || '').trim() : '');
+    const username = get('username');
+    const password = get('password');
+    if (!username && !password) return null;
+
+    const url = get('url');
+    const name = get('name') || domainFromUrl(url) || 'Voce importata';
+
+    return {
+        id: 'csv' + Date.now().toString(36) + i + Math.random().toString(36).slice(2, 8),
+        name,
+        category: '',
+        user: username,
+        pass: password,
+        note: ''
+    };
+}
+
+async function handleCsvImport(event) {
+    const file = event.target.files[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+        let text = await file.text();
+        if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+        const rows = parseCSV(text);
+        if (rows.length < 2) return toast('CSV vuoto o non valido', true);
+
+        const colIdx = detectCsvColumns(rows[0]);
+        const dataRows = rows.slice(1);
+        const existingKeys = new Set(state.entries.map(e => (e.name + '|' + e.user).toLowerCase()));
+
+        let imported = 0, skipped = 0;
+        dataRows.forEach((row, i) => {
+            const entry = csvRowToEntry(row, colIdx, i);
+            if (!entry) return;
+            const key = (entry.name + '|' + entry.user).toLowerCase();
+            if (existingKeys.has(key)) { skipped++; return; }
+            existingKeys.add(key);
+            state.entries.push(entry);
+            imported++;
+        });
+
+        renderCategoryChips();
+        applyFilters();
+        if (imported > 0) await persist();
+
+        toast(`Importate ${imported} voci, ${skipped} duplicati saltati`);
+        showCsvReminder();
+    } catch (e) {
+        toast('Errore durante la lettura del CSV', true);
+    }
+}
+
 // ── MODAL ────────────────────────────────────────────────────
 function openAdd() {
     document.getElementById('modal-title').textContent = 'Nuova voce';
@@ -730,6 +852,8 @@ async function persist() {
 function setSyncBar(t) { document.getElementById('sync-bar').textContent = t; }
 function showSyncBanner() { document.getElementById('sync-banner').classList.add('show'); }
 function hideSyncBanner() { document.getElementById('sync-banner').classList.remove('show'); }
+function showCsvReminder() { document.getElementById('csv-reminder-banner').classList.add('show'); }
+function hideCsvReminder() { document.getElementById('csv-reminder-banner').classList.remove('show'); }
 
 // ── UTILS ────────────────────────────────────────────────────
 function x(s) {

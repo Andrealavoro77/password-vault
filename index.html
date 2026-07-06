@@ -34,13 +34,13 @@
 
         .form-group { margin-bottom: 16px; }
         label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
-        input[type=text], input[type=password] {
+        input[type=text], input[type=password], select {
             width: 100%; padding: 14px 16px;
             background: var(--card); border: 1px solid #2a2a4a;
             border-radius: var(--radius); color: var(--text);
             font-size: 16px; outline: none; transition: border-color 0.2s;
         }
-        input:focus { border-color: var(--primary); }
+        input:focus, select:focus { border-color: var(--primary); }
 
         .btn {
             width: 100%; padding: 14px; border: none;
@@ -83,6 +83,11 @@
         }
         .entry-card:hover { border-color: #3a3a6f; }
         .entry-name { font-weight: 600; font-size: 16px; margin-bottom: 4px; }
+        .entry-cat {
+            display: inline-block; font-size: 11px; font-weight: 600;
+            color: var(--primary); background: rgba(233,69,96,0.12);
+            border-radius: 8px; padding: 2px 8px; margin-bottom: 8px;
+        }
         .entry-user { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
         .entry-btns { display: flex; gap: 8px; flex-wrap: wrap; }
 
@@ -194,6 +199,10 @@
         <div class="form-group">
             <label>Nome / Sito / App</label>
             <input type="text" id="m-name" placeholder="es. Gmail, Netflix, Banca...">
+        </div>
+        <div class="form-group">
+            <label>Categoria</label>
+            <select id="m-category"></select>
         </div>
         <div class="form-group">
             <label>Username / Email</label>
@@ -326,6 +335,14 @@ async function saveGist(data) {
 const state = { token: null, gistId: null, key: null, vault: null, entries: [] };
 const ls = (k, v) => v === undefined ? localStorage.getItem(k) : localStorage.setItem(k, v);
 
+// ── CATEGORIE ────────────────────────────────────────────────
+const CATEGORIES = ['Email', 'Social', 'API Key', 'Banca', 'Altro'];
+function populateCategorySelect() {
+    const sel = document.getElementById('m-category');
+    sel.innerHTML = CATEGORIES.map(c => `<option value="${x(c)}">${x(c)}</option>`).join('');
+}
+function categoryOf(e) { return e.category || 'Generale'; }
+
 // ── SCREENS ──────────────────────────────────────────────────
 function show(id) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -430,6 +447,7 @@ function renderEntries(list) {
     }
     el.innerHTML = list.map(e => `
         <div class="entry-card" onclick="openEdit('${e.id}')">
+            <div class="entry-cat">${x(categoryOf(e))}</div>
             <div class="entry-name">${x(e.name)}</div>
             <div class="entry-user">${x(e.user || '—')}</div>
             <div class="entry-btns">
@@ -451,6 +469,7 @@ function filterEntries(q) {
 function openAdd() {
     document.getElementById('modal-title').textContent = 'Nuova voce';
     ['m-id','m-name','m-user','m-pass','m-note'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('m-category').value = CATEGORIES[0];
     document.getElementById('m-pass').type = 'password';
     document.getElementById('m-del').style.display = 'none';
     document.getElementById('modal-overlay').classList.add('active');
@@ -463,6 +482,7 @@ function openEdit(id) {
     document.getElementById('modal-title').textContent = 'Modifica voce';
     document.getElementById('m-id').value   = e.id;
     document.getElementById('m-name').value = e.name;
+    document.getElementById('m-category').value = CATEGORIES.includes(e.category) ? e.category : CATEGORIES[0];
     document.getElementById('m-user').value = e.user  || '';
     document.getElementById('m-pass').value = e.pass;
     document.getElementById('m-note').value = e.note  || '';
@@ -486,6 +506,7 @@ async function saveEntry() {
     const id  = document.getElementById('m-id').value || Date.now().toString(36);
     const entry = {
         id, name,
+        category: document.getElementById('m-category').value,
         user: document.getElementById('m-user').value.trim(),
         pass,
         note: document.getElementById('m-note').value.trim()
@@ -542,6 +563,7 @@ function toast(msg, err = false) {
 
 // ── INIT ─────────────────────────────────────────────────────
 (function() {
+    populateCategorySelect();
     if (ls('token') && ls('owner')) {
         show('login');
         setTimeout(() => document.getElementById('l-master').focus(), 100);

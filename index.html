@@ -72,6 +72,18 @@
         }
         .search-wrap { padding: 12px 16px; background: var(--surface); }
         .search-wrap input { border-radius: 24px; padding: 10px 16px; }
+        .chip-row {
+            display: flex; gap: 8px; padding: 0 16px 12px;
+            overflow-x: auto; background: var(--surface);
+        }
+        .chip-row::-webkit-scrollbar { display: none; }
+        .chip {
+            flex: 0 0 auto; padding: 8px 14px; border-radius: 20px;
+            background: var(--card); border: 1px solid #2a2a4a; color: var(--text);
+            font-size: 13px; cursor: pointer; white-space: nowrap;
+        }
+        .chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+        .chip-add { border-style: dashed; color: var(--muted); }
         .sync-bar { font-size: 12px; color: var(--muted); text-align: center; padding: 6px; }
         .entries { flex: 1; padding: 8px 16px 80px; }
 
@@ -186,6 +198,7 @@
     <div class="search-wrap">
         <input type="text" placeholder="Cerca..." oninput="filterEntries(this.value)" style="width:100%">
     </div>
+    <div class="chip-row" id="cat-chips"></div>
     <div class="sync-bar" id="sync-bar"></div>
     <div class="entries" id="entries"></div>
     <button class="fab" onclick="openAdd()">＋</button>
@@ -312,7 +325,7 @@ async function findOrCreateGist() {
     const result = await loadVault(owner);
     if (result) return result.data;
     const salt = b64(crypto.getRandomValues(new Uint8Array(16)));
-    const initData = { salt, entries: null };
+    const initData = { salt, entries: null, categories: null };
     await saveVault(owner, initData, null);
     state.vaultSha = (await loadVault(owner)).sha;
     return initData;
@@ -332,14 +345,15 @@ async function saveGist(data) {
 }
 
 // ── STATE ────────────────────────────────────────────────────
-const state = { token: null, gistId: null, key: null, vault: null, entries: [] };
+const state = { token: null, gistId: null, key: null, vault: null, entries: [], categories: [], activeCategory: null, searchQuery: '' };
 const ls = (k, v) => v === undefined ? localStorage.getItem(k) : localStorage.setItem(k, v);
 
 // ── CATEGORIE ────────────────────────────────────────────────
-const CATEGORIES = ['Email', 'Social', 'API Key', 'Banca', 'Altro'];
+const DEFAULT_CATEGORIES = ['Email', 'Social', 'API Key', 'Banca', 'Altro'];
 function populateCategorySelect() {
     const sel = document.getElementById('m-category');
-    sel.innerHTML = CATEGORIES.map(c => `<option value="${x(c)}">${x(c)}</option>`).join('');
+    const list = state.categories.length ? state.categories : DEFAULT_CATEGORIES;
+    sel.innerHTML = list.map(c => `<option value="${x(c)}">${x(c)}</option>`).join('');
 }
 function categoryOf(e) { return e.category || 'Generale'; }
 
@@ -377,11 +391,18 @@ async function doSetup() {
             try { entries = await aesDecrypt(key, vault.entries); } catch {}
         }
 
+        let categories = DEFAULT_CATEGORIES.slice();
+        let needCategorySave = true;
+        if (vault.categories) {
+            try { categories = await aesDecrypt(key, vault.categories); needCategorySave = false; } catch {}
+        }
+
         ls('token', token);
         ls('owner', state.owner);
 
-        Object.assign(state, { key, vault, entries });
+        Object.assign(state, { key, vault, entries, categories });
         enterMain();
+        if (needCategorySave) await persist();
     } catch(e) {
         state.token = null;
         setMsg('s-msg', e.message || 'Errore di connessione', 'error');
@@ -409,17 +430,28 @@ async function doLogin() {
             }
         }
 
-        Object.assign(state, { key, vault, entries });
+        let categories = DEFAULT_CATEGORIES.slice();
+        let needCategorySave = true;
+        if (vault.categories) {
+            try { categories = await aesDecrypt(key, vault.categories); needCategorySave = false; } catch {}
+        }
+
+        Object.assign(state, { key, vault, entries, categories });
         ls('owner', state.owner);
         enterMain();
+        if (needCategorySave) await persist();
     } catch(e) {
         setMsg('l-msg', e.message || 'Errore', 'error');
     }
 }
 
 function enterMain() {
+    state.activeCategory = null;
+    state.searchQuery = '';
     show('main');
-    renderEntries(state.entries);
+    populateCategorySelect();
+    renderCategoryChips();
+    applyFilters();
     setSyncBar('Sincronizzato ✓');
 }
 
@@ -457,19 +489,72 @@ function renderEntries(list) {
         </div>`).join('');
 }
 
+function applyFilters() {
+    let list = state.entries;
+    if (state.activeCategory) {
+        list = list.filter(e => categoryOf(e) === state.activeCategory);
+    }
+    const q = state.searchQuery;
+    if (q) {
+        list = list.filter(e =>
+            e.name.toLowerCase().includes(q.toLowerCase()) ||
+            (e.user || '').toLowerCase().includes(q.toLowerCase())
+        );
+    }
+    renderEntries(list);
+}
+
 function filterEntries(q) {
-    const f = q ? state.entries.filter(e =>
-        e.name.toLowerCase().includes(q.toLowerCase()) ||
-        (e.user || '').toLowerCase().includes(q.toLowerCase())
-    ) : state.entries;
-    renderEntries(f);
+    state.searchQuery = q;
+    applyFilters();
+}
+
+// ── CHIP CATEGORIE ───────────────────────────────────────────
+function renderCategoryChips() {
+    const el = document.getElementById('cat-chips');
+    el.innerHTML = '';
+    const makeChip = (label, value, isAdd = false) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'chip' + (isAdd ? ' chip-add' : '');
+        b.textContent = label;
+        if (isAdd) {
+            b.addEventListener('click', addCategory);
+        } else {
+            if (value === state.activeCategory) b.classList.add('active');
+            b.addEventListener('click', () => selectCategory(value));
+        }
+        el.appendChild(b);
+    };
+    makeChip('Tutte', null);
+    state.categories.forEach(c => makeChip(c, c));
+    makeChip('＋ Nuova', null, true);
+}
+
+function selectCategory(cat) {
+    state.activeCategory = cat;
+    renderCategoryChips();
+    applyFilters();
+}
+
+async function addCategory() {
+    const name = (prompt('Nome nuova categoria:') || '').trim();
+    if (!name) return;
+    if (state.categories.some(c => c.toLowerCase() === name.toLowerCase())) {
+        return toast('Categoria già esistente', true);
+    }
+    state.categories.push(name);
+    renderCategoryChips();
+    populateCategorySelect();
+    await persist();
 }
 
 // ── MODAL ────────────────────────────────────────────────────
 function openAdd() {
     document.getElementById('modal-title').textContent = 'Nuova voce';
     ['m-id','m-name','m-user','m-pass','m-note'].forEach(id => document.getElementById(id).value = '');
-    document.getElementById('m-category').value = CATEGORIES[0];
+    populateCategorySelect();
+    document.getElementById('m-category').value = state.categories[0] || DEFAULT_CATEGORIES[0];
     document.getElementById('m-pass').type = 'password';
     document.getElementById('m-del').style.display = 'none';
     document.getElementById('modal-overlay').classList.add('active');
@@ -482,7 +567,8 @@ function openEdit(id) {
     document.getElementById('modal-title').textContent = 'Modifica voce';
     document.getElementById('m-id').value   = e.id;
     document.getElementById('m-name').value = e.name;
-    document.getElementById('m-category').value = CATEGORIES.includes(e.category) ? e.category : CATEGORIES[0];
+    populateCategorySelect();
+    document.getElementById('m-category').value = state.categories.includes(e.category) ? e.category : (state.categories[0] || DEFAULT_CATEGORIES[0]);
     document.getElementById('m-user').value = e.user  || '';
     document.getElementById('m-pass').value = e.pass;
     document.getElementById('m-note').value = e.note  || '';
@@ -532,8 +618,10 @@ async function deleteEntry() {
 async function persist() {
     setSyncBar('⏳ Salvataggio...');
     try {
-        const encrypted = await aesEncrypt(state.key, state.entries);
-        state.vault.entries = encrypted;
+        const encEntries = await aesEncrypt(state.key, state.entries);
+        const encCategories = await aesEncrypt(state.key, state.categories);
+        state.vault.entries = encEntries;
+        state.vault.categories = encCategories;
         await saveGist(state.vault);
         setSyncBar('Sincronizzato ✓');
         toast('Salvato');

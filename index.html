@@ -83,6 +83,11 @@
         }
         .chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
         .chip-add { border-style: dashed; color: var(--muted); }
+        .cat-chip { display: inline-flex; align-items: center; gap: 6px; }
+        .chip-del {
+            background: none; border: none; color: inherit; cursor: pointer;
+            font-size: 12px; padding: 0; line-height: 1;
+        }
         .sync-bar { font-size: 12px; color: var(--muted); text-align: center; padding: 6px; }
         .entries { flex: 1; padding: 8px 16px 80px; }
 
@@ -526,7 +531,8 @@ function filterEntries(q) {
 function renderCategoryChips() {
     const el = document.getElementById('cat-chips');
     el.innerHTML = '';
-    const makeChip = (label, value, isAdd = false) => {
+
+    const makeSimpleChip = (label, value, isAdd = false) => {
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'chip' + (isAdd ? ' chip-add' : '');
@@ -539,9 +545,36 @@ function renderCategoryChips() {
         }
         el.appendChild(b);
     };
-    makeChip('Tutte', null);
-    state.categories.forEach(c => makeChip(c, c));
-    makeChip('＋ Nuova', null, true);
+
+    makeSimpleChip('Tutte', null);
+
+    state.categories.forEach(c => {
+        const count = state.entries.filter(e => categoryOf(e) === c).length;
+        const chip = document.createElement('div');
+        chip.className = 'chip cat-chip' + (c === state.activeCategory ? ' active' : '');
+        chip.addEventListener('click', () => selectCategory(c));
+
+        const label = document.createElement('span');
+        label.textContent = c;
+        chip.appendChild(label);
+
+        if (count === 0) {
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'chip-del';
+            del.textContent = '🗑';
+            del.title = 'Elimina categoria';
+            del.addEventListener('click', ev => {
+                ev.stopPropagation();
+                deleteCategory(c);
+            });
+            chip.appendChild(del);
+        }
+
+        el.appendChild(chip);
+    });
+
+    makeSimpleChip('＋ Nuova', null, true);
 }
 
 function selectCategory(cat) {
@@ -559,6 +592,16 @@ async function addCategory() {
     state.categories.push(name);
     renderCategoryChips();
     populateCategorySelect();
+    await persist();
+}
+
+async function deleteCategory(cat) {
+    if (!confirm(`Eliminare la categoria "${cat}"?`)) return;
+    state.categories = state.categories.filter(c => c !== cat);
+    if (state.activeCategory === cat) state.activeCategory = null;
+    renderCategoryChips();
+    populateCategorySelect();
+    applyFilters();
     await persist();
 }
 

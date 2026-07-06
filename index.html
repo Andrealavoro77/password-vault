@@ -373,6 +373,7 @@ function populateCategorySelect() {
     sel.innerHTML = list.map(c => `<option value="${x(c)}">${x(c)}</option>`).join('');
 }
 function categoryOf(e) { return e.category || 'Generale'; }
+const UNASSIGNED_CATEGORY = '__unassigned__';
 
 // ── SCREENS ──────────────────────────────────────────────────
 function show(id) {
@@ -508,17 +509,21 @@ function renderEntries(list) {
 }
 
 function applyFilters() {
-    let list = state.entries;
-    if (state.activeCategory) {
-        list = list.filter(e => categoryOf(e) === state.activeCategory);
-    }
     const q = state.searchQuery;
     if (q) {
-        list = list.filter(e =>
+        // La ricerca testuale cerca su tutte le entry, indipendentemente dal chip attivo
+        const list = state.entries.filter(e =>
             e.name.toLowerCase().includes(q.toLowerCase()) ||
             (e.user || '').toLowerCase().includes(q.toLowerCase())
         );
+        return renderEntries(list);
     }
+    if (!state.activeCategory) {
+        return renderEntries([]);
+    }
+    const list = state.activeCategory === UNASSIGNED_CATEGORY
+        ? state.entries.filter(e => categoryOf(e) === 'Generale')
+        : state.entries.filter(e => categoryOf(e) === state.activeCategory);
     renderEntries(list);
 }
 
@@ -546,8 +551,6 @@ function renderCategoryChips() {
         el.appendChild(b);
     };
 
-    makeSimpleChip('Tutte', null);
-
     state.categories.forEach(c => {
         const count = state.entries.filter(e => categoryOf(e) === c).length;
         const chip = document.createElement('div');
@@ -574,6 +577,7 @@ function renderCategoryChips() {
         el.appendChild(chip);
     });
 
+    makeSimpleChip('Da assegnare', UNASSIGNED_CATEGORY);
     makeSimpleChip('＋ Nuova', null, true);
 }
 
